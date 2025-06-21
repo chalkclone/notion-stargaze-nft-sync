@@ -1,8 +1,9 @@
 import os
 import requests
+import json
 from notion_client import Client
 
-# Константы из переменных окружения
+# Получение переменных окружения
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 NOTION_DB_ID = os.getenv("NOTION_DB_ID")
 STARGAZE_ADDRESS = os.getenv("STARGAZE_ADDRESS")
@@ -19,50 +20,66 @@ COINGECKO_IDS = {
 }
 
 def get_nfts():
-    # MOCK: Возвращаем фиктивный NFT
-    return [{
-        "token_id": "123",
-        "token_uri": "https://ipfs.io/ipfs/Qm.../metadata.json"
-    }]
-
+    url = "https://graphql.mainnet.stargaze-apis.com/graphql"
+    query = {
+        "query": """
+        query($owner: String!) {
+          tokens(owner: $owner) {
+            collectionAddr
+            tokenId
+            tokenURI
+            owner { address }
+          }
+        }
+        """,
+        "variables": {"owner": STARGAZE_ADDRESS}
+    }
+    print(f"🔗 GraphQL: {url} → owner={STARGAZE_ADDRESS}")
+    r = requests.post(url, json=query)
+    r.raise_for_status()
+    data = r.json().get("data", {}).get("tokens", [])
+    print(f"📦 Получено NFT: {len(data)}")
+    return data
 
 def get_prices():
     ids = ",".join(COINGECKO_IDS.values())
     url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd"
     print(f"🔗 Запрос курсов CoinGecko: {url}")
-    try:
-        r = requests.get(url)
-        r.raise_for_status()
-        data = r.json()
-        prices = {sym.upper(): data.get(api_id, {}).get("usd", 0) for sym, api_id in COINGECKO_IDS.items()}
-        print(f"💱 Курсы получены: {prices}")
-        return prices
-    except Exception as e:
-        print(f"❌ Ошибка получения курсов: {e}")
-        return {}
+    r = requests.get(url)
+    r.raise_for_status()
+    data = r.json()
+    prices = {sym.upper(): data.get(api_id, {}).get("usd", 0) for sym, api_id in COINGECKO_IDS.items()}
+    print(f"💱 Курсы получены: {prices}")
+    return prices
 
 def upsert_nfts(nfts, prices):
     for nft in nfts:
-        token_id = nft.get("token_id")
-        token_uri = nft.get("token_uri")
-        print(f"🧙‍♂️ Обрабатываем NFT {token_id}")
-
+        token_id = nft.get("tokenId")
+        token_uri = nft.get("tokenURI")
         if not token_uri:
-            print("⚠️ Пропущен NFT без token_uri")
             continue
 
         try:
-            meta = requests.get(token_uri).json()
-            name = meta.get("name", "NFT") + f" #{token_id}"
-            image = meta.get("image", "")
+            meta = requests.get(token_uri)
+            meta.raise_for_status()
+            meta = meta.json()
+        except Exception as e:
+            print(f"❌ Ошибка при загрузке метаданных: {e}")
+            continue
 
-            # MOCK: фиктивные данные, пока нет маркетплейса
-            currency = "STARS"
-            amount = 100.0
-            sender = "unknown"
-            price_usd = amount * prices.get(currency, 0)
+        name = meta.get("name", "NFT") + f" #{token_id}"
+        image = meta.get("image", "")
 
-            response = notion.pages.create(
+        # MOCK цены, можно заменить позже на real
+        currency = "STARS"
+        amount = 100.0
+        sender = nft.get("owner", {}).get("address", "unknown")
+        price_usd = round(amount * prices.get(currency, 0), 2)
+
+        print(f"➕ Добавление {name}")
+
+        try:
+            notion.pages.create(
                 parent={"database_id": NOTION_DB_ID},
                 properties={
                     "Name": {"title": [{"text": {"content": name}}]},
@@ -71,26 +88,26 @@ def upsert_nfts(nfts, prices):
                     "Price (USD)": {"number": price_usd},
                     "Sender": {"rich_text": [{"text": {"content": sender}}]}
                 },
-                cover={"external": {"url": image}}
+                cover={"external": {"url": image}} if image else None
             )
-            print(f"✅ Добавлено в Notion: {name}")
         except Exception as e:
-            print(f"❌ Ошибка добавления NFT {token_id} в Notion: {e}")
+            print(f"⚠️ Ошибка Notion: {e}")
+
 
 def main():
-    print("🚀 Запуск синхронизации Stargaze → Notion")
+    print("\n🚀 Запуск синхронизации Stargaze → Notion")
+    try:
+        nfts = get_nfts()
+    except Exception as e:
+        print(f"❌ Ошибка получения NFT: {e}")
+        nfts = []
 
-    if not NOTION_TOKEN or not NOTION_DB_ID or not STARGAZE_ADDRESS:
-        print("❌ Не заданы переменные окружения! Проверь NOTION_TOKEN, NOTION_DB_ID, STARGAZE_ADDRESS")
-        return
-
-    nfts = get_nfts()
     prices = get_prices()
 
-    if nfts and prices:
-        upsert_nfts(nfts, prices)
-    else:
+    if not nfts:
         print("⚠️ Нет данных для синхронизации")
+    else:
+        upsert_nfts(nfts, prices)
 
     print("🌟 Синхронизация завершена")
 
