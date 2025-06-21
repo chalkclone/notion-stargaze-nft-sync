@@ -1,6 +1,5 @@
 import os
 import requests
-import json
 from notion_client import Client
 
 # Константы из переменных окружения
@@ -21,48 +20,85 @@ COINGECKO_IDS = {
 
 def get_nfts():
     url = f"https://rest.stargaze-apis.com/cosmos/nft/v1beta1/nfts?owner={STARGAZE_ADDRESS}"
-    r = requests.get(url)
-    return r.json().get("nfts", [])
+    print(f"🔗 Запрос NFT по адресу: {url}")
+    try:
+        r = requests.get(url)
+        r.raise_for_status()
+        nfts = r.json().get("nfts", [])
+        print(f"📦 Найдено NFT: {len(nfts)}")
+        return nfts
+    except Exception as e:
+        print(f"❌ Ошибка получения NFT: {e}")
+        return []
 
 def get_prices():
     ids = ",".join(COINGECKO_IDS.values())
     url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd"
-    r = requests.get(url)
-    data = r.json()
-    return {sym.upper(): data.get(api_id, {}).get("usd", 0) for sym, api_id in COINGECKO_IDS.items()}
+    print(f"🔗 Запрос курсов CoinGecko: {url}")
+    try:
+        r = requests.get(url)
+        r.raise_for_status()
+        data = r.json()
+        prices = {sym.upper(): data.get(api_id, {}).get("usd", 0) for sym, api_id in COINGECKO_IDS.items()}
+        print(f"💱 Курсы получены: {prices}")
+        return prices
+    except Exception as e:
+        print(f"❌ Ошибка получения курсов: {e}")
+        return {}
 
 def upsert_nfts(nfts, prices):
     for nft in nfts:
         token_id = nft.get("token_id")
         token_uri = nft.get("token_uri")
+        print(f"🧙‍♂️ Обрабатываем NFT {token_id}")
+
         if not token_uri:
+            print("⚠️ Пропущен NFT без token_uri")
             continue
-        meta = requests.get(token_uri).json()
-        name = meta.get("name", "NFT") + f" #{token_id}"
-        image = meta.get("image", "")
 
-        # MOCK: вставка тестовых данных (так как marketplace API защищён)
-        currency = "STARS"
-        amount = 100.0
-        sender = "unknown"
-        price_usd = amount * prices.get(currency, 0)
+        try:
+            meta = requests.get(token_uri).json()
+            name = meta.get("name", "NFT") + f" #{token_id}"
+            image = meta.get("image", "")
 
-        notion.pages.create(
-            parent={"database_id": NOTION_DB_ID},
-            properties={
-                "Name": {"title": [{"text": {"content": name}}]},
-                "Currency": {"select": {"name": currency}},
-                "Price (token)": {"number": amount},
-                "Price (USD)": {"number": price_usd},
-                "Sender": {"rich_text": [{"text": {"content": sender}}]}
-            },
-            cover={"external": {"url": image}}
-        )
+            # MOCK: фиктивные данные, пока нет маркетплейса
+            currency = "STARS"
+            amount = 100.0
+            sender = "unknown"
+            price_usd = amount * prices.get(currency, 0)
+
+            response = notion.pages.create(
+                parent={"database_id": NOTION_DB_ID},
+                properties={
+                    "Name": {"title": [{"text": {"content": name}}]},
+                    "Currency": {"select": {"name": currency}},
+                    "Price (token)": {"number": amount},
+                    "Price (USD)": {"number": price_usd},
+                    "Sender": {"rich_text": [{"text": {"content": sender}}]}
+                },
+                cover={"external": {"url": image}}
+            )
+            print(f"✅ Добавлено в Notion: {name}")
+        except Exception as e:
+            print(f"❌ Ошибка добавления NFT {token_id} в Notion: {e}")
 
 def main():
+    print("🚀 Запуск синхронизации Stargaze → Notion")
+
+    if not NOTION_TOKEN or not NOTION_DB_ID or not STARGAZE_ADDRESS:
+        print("❌ Не заданы переменные окружения! Проверь NOTION_TOKEN, NOTION_DB_ID, STARGAZE_ADDRESS")
+        return
+
     nfts = get_nfts()
     prices = get_prices()
-    upsert_nfts(nfts, prices)
+
+    if nfts and prices:
+        upsert_nfts(nfts, prices)
+    else:
+        print("⚠️ Нет данных для синхронизации")
+
+    print("🌟 Синхронизация завершена")
 
 if __name__ == "__main__":
     main()
+
