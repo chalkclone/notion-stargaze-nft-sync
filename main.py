@@ -19,17 +19,12 @@ COINGECKO_IDS = {
 }
 
 def get_nfts():
-    url = f"https://rest.stargaze-apis.com/cosmos/nft/v1beta1/nfts?owner={STARGAZE_ADDRESS}"
-    print(f"🔗 Запрос NFT по адресу: {url}")
-    try:
-        r = requests.get(url)
-        r.raise_for_status()
-        nfts = r.json().get("nfts", [])
-        print(f"📦 Найдено NFT: {len(nfts)}")
-        return nfts
-    except Exception as e:
-        print(f"❌ Ошибка получения NFT: {e}")
-        return []
+    # MOCK: Возвращаем фиктивный NFT
+    return [{
+        "token_id": "123",
+        "token_uri": "https://ipfs.io/ipfs/Qm.../metadata.json"
+    }]
+
 
 def get_prices():
     ids = ",".join(COINGECKO_IDS.values())
